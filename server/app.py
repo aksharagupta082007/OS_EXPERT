@@ -1,9 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
-
 """
 FastAPI application for the Os Expert Env Environment.
 
@@ -38,7 +32,9 @@ except Exception as e:  # pragma: no cover
 try:
     from ..models import OsExpertAction, OsExpertObservation
     from .os_expert_env_environment import OsExpertEnvironment
-except ModuleNotFoundError:
+except (ImportError, SystemError):
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
     from models import OsExpertAction, OsExpertObservation
     from server.os_expert_env_environment import OsExpertEnvironment
 
@@ -49,36 +45,25 @@ app = create_app(
     OsExpertAction,
     OsExpertObservation,
     env_name="os_expert_env",
-    max_concurrent_envs=1,  # increase this number to allow more concurrent WebSocket sessions
+    max_concurrent_envs=4,  # increase this number to allow more concurrent WebSocket sessions
+)
+
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
 def main(host: str = "0.0.0.0", port: int = 8000):
-    """
-    Entry point for direct execution via uv run or python -m.
-
-    This function enables running the server without Docker:
-        uv run --project . server
-        uv run --project . server --port 8001
-        python -m os_expert_env.server.app
-
-    Args:
-        host: Host address to bind to (default: "0.0.0.0")
-        port: Port number to listen on (default: 8000)
-
-    For production deployments, consider using uvicorn directly with
-    multiple workers:
-        uvicorn os_expert_env.server.app:app --workers 4
-    """
+    """Entry point for direct execution via uv run or python -m."""
     import uvicorn
 
     uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=8000)
-    args = parser.parse_args()
-    main(port=args.port)
+    main()
