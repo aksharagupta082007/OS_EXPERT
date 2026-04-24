@@ -1,5 +1,5 @@
 ---
-title: Os Expert Env Environment Server
+title: Os Expert  Environment Server
 emoji: 🌟
 colorFrom: yellow
 colorTo: red
