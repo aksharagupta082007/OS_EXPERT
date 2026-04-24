@@ -4,74 +4,64 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Os Expert Env Environment Client."""
+"""OS Expert Environment Client."""
 
-from typing import Dict
+from typing import Any, Dict
 
 from openenv.core import EnvClient
 from openenv.core.client_types import StepResult
 from openenv.core.env_server.types import State
 
-from .models import OsExpertAction, OsExpertObservation
+from .models import SovereignAction, SovereignObservation, ToolResult
 
 
 class OsExpertEnv(
-    EnvClient[OsExpertAction, OsExpertObservation, State]
+    EnvClient[SovereignAction, SovereignObservation, State]
 ):
-    """
-    Client for the Os Expert Env Environment.
+    """Client for the OS Expert Environment.
 
-    This client maintains a persistent WebSocket connection to the environment server,
-    enabling efficient multi-step interactions with lower latency.
-    Each client instance has its own dedicated environment session on the server.
+    Maintains a persistent WebSocket connection to the environment server
+    for efficient multi-step interactions with lower latency.
 
-    Example:
-        >>> # Connect to a running server
-        >>> with OsExpertEnv(base_url="http://localhost:8000") as client:
-        ...     result = client.reset()
-        ...     print(result.observation.echoed_message)
-        ...
-        ...     result = client.step(OsExpertAction(message="Hello!"))
-        ...     print(result.observation.echoed_message)
+    Example::
 
-    Example with Docker:
-        >>> # Automatically start container and connect
-        >>> client = OsExpertEnv.from_docker_image("os_expert_env-env:latest")
-        >>> try:
-        ...     result = client.reset()
-        ...     result = client.step(OsExpertAction(message="Test"))
-        ... finally:
-        ...     client.close()
+        with OsExpertEnv(base_url="http://localhost:8000") as client:
+            result = client.reset()
+            print(result.observation.system_snapshot)
+
+            result = client.step(SovereignAction(
+                tool="fs.list",
+                params={"path": "/etc"}
+            ))
+            print(result.observation.tool_result.stdout)
     """
 
-    def _step_payload(self, action: OsExpertAction) -> Dict:
-        """
-        Convert OsExpertAction to JSON payload for step message.
-
-        Args:
-            action: OsExpertAction instance
-
-        Returns:
-            Dictionary representation suitable for JSON encoding
-        """
+    def _step_payload(self, action: SovereignAction) -> Dict[str, Any]:
+        """Convert SovereignAction to JSON payload for step message."""
         return {
-            "message": action.message,
+            "tool": action.tool,
+            "params": action.params,
         }
 
-    def _parse_result(self, payload: Dict) -> StepResult[OsExpertObservation]:
-        """
-        Parse server response into StepResult[OsExpertObservation].
-
-        Args:
-            payload: JSON response data from server
-
-        Returns:
-            StepResult with OsExpertObservation
-        """
+    def _parse_result(self, payload: Dict[str, Any]) -> StepResult[SovereignObservation]:
+        """Parse server response into StepResult[SovereignObservation]."""
         obs_data = payload.get("observation", {})
-        observation = OsExpertObservation(
-            echoed_message=obs_data.get("echoed_message", ""),
-            message_length=obs_data.get("message_length", 0),
+
+        # Parse the nested ToolResult
+        tr_data = obs_data.get("tool_result", {})
+        tool_result = ToolResult(
+            status=tr_data.get("status", "error"),
+            stdout=tr_data.get("stdout", ""),
+            stderr=tr_data.get("stderr", ""),
+            exit_code=tr_data.get("exit_code", -1),
+            state_delta=tr_data.get("state_delta", {}),
+        )
+
+        observation = SovereignObservation(
+            tool_result=tool_result,
+            system_snapshot=obs_data.get("system_snapshot", {}),
+            safety_violation=obs_data.get("safety_violation"),
+            tool_name=obs_data.get("tool_name", ""),
             done=payload.get("done", False),
             reward=payload.get("reward"),
             metadata=obs_data.get("metadata", {}),
@@ -83,16 +73,8 @@ class OsExpertEnv(
             done=payload.get("done", False),
         )
 
-    def _parse_state(self, payload: Dict) -> State:
-        """
-        Parse server response into State object.
-
-        Args:
-            payload: JSON response from state request
-
-        Returns:
-            State object with episode_id and step_count
-        """
+    def _parse_state(self, payload: Dict[str, Any]) -> State:
+        """Parse server response into State object."""
         return State(
             episode_id=payload.get("episode_id"),
             step_count=payload.get("step_count", 0),

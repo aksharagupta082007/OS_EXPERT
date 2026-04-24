@@ -116,11 +116,15 @@ celerybeat.pid
 # Environments
 .env
 .venv
-env/
+# env/  -- DO NOT ignore: our code lives in env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# OS Expert sandbox data (dev mode)
+data/
+test_connection.py
 
 # Spyder project settings
 .spyderproject

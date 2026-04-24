@@ -4,13 +4,14 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Os Expert Env Environment."""
+"""OS Expert Environment — High-fidelity Linux sandbox for RL training."""
 
 from .client import OsExpertEnv
-from .models import OsExpertAction, OsExpertObservation
+from .models import SovereignAction, SovereignObservation, ToolResult
 
 __all__ = [
-    "OsExpertAction",
-    "OsExpertObservation",
+    "SovereignAction",
+    "SovereignObservation",
+    "ToolResult",
     "OsExpertEnv",
 ]

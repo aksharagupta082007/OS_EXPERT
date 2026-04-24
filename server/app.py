@@ -1,5 +1,5 @@
 """
-FastAPI application for the Os Expert Env Environment.
+FastAPI application for the OS Expert Environment.
 
 This module creates an HTTP server that exposes the OsExpertEnvironment
 over HTTP and WebSocket endpoints, compatible with EnvClient.
@@ -30,22 +30,22 @@ except Exception as e:  # pragma: no cover
     ) from e
 
 try:
-    from ..models import OsExpertAction, OsExpertObservation
-    from .os_expert_env_environment import OsExpertEnvironment
+    from ..models import SovereignAction, SovereignObservation
+    from ..os_expert_env_environment import OsExpertEnvironment
 except (ImportError, SystemError):
     import sys, os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-    from models import OsExpertAction, OsExpertObservation
-    from server.os_expert_env_environment import OsExpertEnvironment
+    from models import SovereignAction, SovereignObservation
+    from os_expert_env_environment import OsExpertEnvironment
 
 
 # Create the app with web interface and README integration
 app = create_app(
     OsExpertEnvironment,
-    OsExpertAction,
-    OsExpertObservation,
+    SovereignAction,
+    SovereignObservation,
     env_name="os_expert_env",
-    max_concurrent_envs=4,  # increase this number to allow more concurrent WebSocket sessions
+    max_concurrent_envs=4,
 )
 
 from fastapi.middleware.cors import CORSMiddleware
