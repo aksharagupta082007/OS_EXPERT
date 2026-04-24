@@ -1,2 +1,0 @@
-[console_scripts]
-server = os_expert_env.server.app:main
