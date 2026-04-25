@@ -44,7 +44,7 @@ app = create_app(
     OsExpertEnvironment,
     SovereignAction,
     SovereignObservation,
-    max_concurrent_envs=4,
+    max_concurrent_envs=100,
 )
 
 
@@ -57,6 +57,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup_event():
+    import anyio
+    anyio.to_thread.current_default_thread_limiter().total_tokens = 200
 
 def main(host: str = "0.0.0.0", port: int = 8000):
     """Entry point for direct execution via uv run or python -m."""

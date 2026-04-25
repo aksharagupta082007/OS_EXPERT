@@ -88,8 +88,8 @@ def check_safety(
         # Normalise: the agent may supply a full sandbox-prefixed path
         # (e.g. /tmp/active_sandbox/etc/hosts) OR a clean Linux path (/etc/hosts).
         # Strip the sandbox prefix so comparison against PROTECTED_PATHS works either way.
-        from env.sandbox_config import SANDBOX_ROOT as _SB_ROOT
-        if raw_target.startswith(_SB_ROOT):
+        _SB_ROOT = hidden_state.get("sandbox_root", "")
+        if _SB_ROOT and raw_target.startswith(_SB_ROOT):
             target_path = raw_target[len(_SB_ROOT):]  # e.g. /etc/hosts
             if not target_path.startswith("/"):
                 target_path = "/" + target_path
