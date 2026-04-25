@@ -105,7 +105,7 @@ RUN mkdir -p /opt/gold_rootfs
 # Copy essential OS directories into the Gold Rootfs
 RUN for dir in bin etc lib lib64 sbin usr var opt; do \
         if [ -d "/$dir" ]; then \
-            cp -a "/$dir" "/opt/gold_rootfs/$dir" ; \
+            cp -a "/$dir" "/opt/gold_rootfs/$dir" || true; \
         fi ; \
     done
 
@@ -119,7 +119,8 @@ RUN mkdir -p /opt/gold_rootfs/tmp \
              /opt/gold_rootfs/sys \
              /opt/gold_rootfs/var/log \
              /opt/gold_rootfs/var/run \
-             /opt/gold_rootfs/var/www/html
+             /opt/gold_rootfs/var/www/html \
+             /opt/gold_rootfs/etc/nginx/sites-available
 
 # Create realistic users inside the gold rootfs
 RUN chroot /opt/gold_rootfs /bin/bash -c " \
@@ -191,4 +192,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the FastAPI server
-CMD ["sh", "-c", "cd /home/user/app/env && uvicorn server.app:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "cd /home/user/app/env && /home/user/app/.venv/bin/python -m uvicorn server.app:app --host 0.0.0.0 --port 8000"]

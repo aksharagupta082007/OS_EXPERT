@@ -35,6 +35,12 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+from pipeline.episode_generator import EpisodeGenerator
+from reward.safety_oracle import check_safety
+from reward.aggregator import breadcrumb_check, calculate_reward
+import reward.grader as grader
+import random
+
 
 class OsExpertEnvironment(Environment):
     """OpenEnv Environment for OS administration RL training.
@@ -65,6 +71,8 @@ class OsExpertEnvironment(Environment):
         self._router = ActionRouter(self._world_state)
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self._reset_count = 0
+        self._episode_generator = EpisodeGenerator()
+        self._current_hidden_state = {}
 
     def reset(
         self,
@@ -86,9 +94,20 @@ class OsExpertEnvironment(Environment):
             SovereignObservation with initial system snapshot.
         """
         self._reset_rubric()
-
+        
+        task_id = kwargs.get("task_id", random.randint(1, 15))
+        
+        # Set task_id on world state so snapshot includes task description
+        self._world_state.set_task_id(task_id)
+        
         # Refresh the sandbox from Gold Rootfs
         snapshot = self._world_state.reset()
+
+        if seed is None:
+            seed = random.randint(0, 1000000)
+        
+        # Inject deterministic broken state
+        self._current_hidden_state = self._episode_generator.generate_episode(task_id, seed)
 
         # Update episode state
         eid = episode_id or self._world_state.episode_id
@@ -135,11 +154,50 @@ class OsExpertEnvironment(Environment):
         """
         self._state.step_count += 1
 
+        raw_command = str(action.model_dump())
+        
+        # 1. Safety Check (Pre-execution)
+        is_safe, penalty, reason = check_safety(
+            raw_command,
+            self._current_hidden_state.get("honeypots", []),
+            tool_name=action.tool,
+            tool_args=action.params,
+        )
+        if not is_safe:
+            self._current_hidden_state["penalty_risk"] = -penalty
+            return SovereignObservation(
+                tool_result=ToolResult(status="blocked", stdout=reason, exit_code=1),
+                system_snapshot={},
+                tool_name=action.tool,
+                done=True,
+                reward=calculate_reward(self._current_hidden_state, self._state.step_count, 0.0),
+                info={"safety_violation": reason}
+            )
+            
+        # 2. Breadcrumbs Check
+        breadcrumb_check(self._current_hidden_state, action.tool, raw_command)
+
         # Dispatch through the action router
         observation = self._router.dispatch(action)
 
         # Apply transform if configured
         observation = self._apply_transform(observation)
+        
+        # 3. Grade Outcome
+        task_id = self._current_hidden_state.get("task_id", 1)
+        grader_func = getattr(grader, f"grade_task_{task_id:02d}", None)
+        
+        outcome_score = 0.0
+        if grader_func:
+            outcome_score = grader_func(self._current_hidden_state)
+            
+        done = False
+        if outcome_score == 5.0 or self._state.step_count >= 15:
+            done = True
+            
+        # 4. Final Reward Calculation
+        observation.reward = calculate_reward(self._current_hidden_state, self._state.step_count, outcome_score)
+        observation.done = done
 
         logger.debug(
             "Step %d — tool=%s status=%s",

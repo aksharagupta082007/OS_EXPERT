@@ -23,7 +23,7 @@ Usage:
 """
 
 try:
-    from openenv.core.env_server.http_server import create_app
+    from openenv.core.env_server.http_server import create_fastapi_app
 except Exception as e:  # pragma: no cover
     raise ImportError(
         "openenv is required for the web interface. Install dependencies with '\n    uv sync\n'"
@@ -39,14 +39,14 @@ except (ImportError, SystemError):
     from os_expert_env_environment import OsExpertEnvironment
 
 
-# Create the app with web interface and README integration
-app = create_app(
+# Create the pure REST/WebSocket app without Gradio to avoid Windows AppLocker DLL issues
+app = create_fastapi_app(
     OsExpertEnvironment,
     SovereignAction,
     SovereignObservation,
-    env_name="os_expert_env",
     max_concurrent_envs=4,
 )
+
 
 from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
