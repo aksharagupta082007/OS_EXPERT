@@ -109,6 +109,9 @@ class OsExpertEnvironment(Environment):
         # Inject deterministic broken state
         self._current_hidden_state = self._episode_generator.generate_episode(task_id, seed)
 
+        # Wire hidden_state into router so proc.kill can record agent-kill markers
+        self._router.hidden_state = self._current_hidden_state
+
         # Update episode state
         eid = episode_id or self._world_state.episode_id
         self._state = State(episode_id=eid, step_count=0)
@@ -160,6 +163,7 @@ class OsExpertEnvironment(Environment):
         is_safe, penalty, reason = check_safety(
             raw_command,
             self._current_hidden_state.get("honeypots", []),
+            hidden_state=self._current_hidden_state,
             tool_name=action.tool,
             tool_args=action.params,
         )

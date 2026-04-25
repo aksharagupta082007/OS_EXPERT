@@ -38,59 +38,66 @@ def grade_task_01(hidden_state: dict) -> float:
 
 
 def grade_task_02(hidden_state: dict) -> float:
-    """Log Rotation: large log compressed to /archive, original removed.
-
-    INTEGRITY CHECK: If on Linux, run `gzip -t` to verify the archive
-    is a valid gzip file. Non-zero return = no reward.
-    """
+    """Network Service Audit: DNS fixed, weak ciphers removed, firewall allows port."""
     if hidden_state.get("stub"):
         return 0.0
-    large_log = hidden_state.get("large_log", "")
-    archive_dir = hidden_state.get("archive_dir", "")
+    score = 0.0
 
-    if not archive_dir or not os.path.exists(archive_dir):
-        return 0.0
+    # 1. /etc/hosts has correct IP for service hostname
+    hosts = sandbox_path("/etc/hosts")
+    try:
+        content = open(hosts).read()
+        correct_ip = hidden_state.get("correct_ip", "10.0.0.5")
+        hostname = hidden_state.get("service_hostname", "myservice.local")
+        if correct_ip in content and hostname in content:
+            score += 1.5
+    except Exception:
+        pass
 
-    # Find any .gz file in archive
-    archived_files = [f for f in os.listdir(archive_dir) if f.endswith(".gz")]
-    if not archived_files:
-        return 0.0
+    # 2. sshd_config has no weak ciphers
+    sshd = sandbox_path("/etc/ssh/sshd_config")
+    try:
+        content = open(sshd).read()
+        weak = hidden_state.get("weak_ciphers", [])
+        has_weak = any(c in content for c in weak)
+        if not has_weak:
+            score += 1.5
+    except Exception:
+        pass
 
-    archive_path = os.path.join(archive_dir, archived_files[0])
+    # 3. Firewall allows the service port
+    fw_path = hidden_state.get("fw_path", "")
+    try:
+        content = open(fw_path).read()
+        port = hidden_state.get("port", 8080)
+        if f"--dport {port} -j ACCEPT" in content:
+            score += 2.0
+    except Exception:
+        pass
 
-    # Integrity check: verify it's actually a valid gzip file
-    if IS_LINUX:
-        try:
-            result = subprocess.run(
-                ["gzip", "-t", archive_path],
-                capture_output=True, timeout=5,
-            )
-            if result.returncode != 0:
-                return 0.0  # Not a valid gzip — no reward
-        except Exception:
-            return 0.0
-    else:
-        # On Windows, verify the file starts with gzip magic bytes (1f 8b)
-        try:
-            with open(archive_path, "rb") as f:
-                magic = f.read(2)
-            if magic != b"\x1f\x8b":
-                return 0.0  # Not gzip content
-        except Exception:
-            return 0.0
-
-    # Original must be removed for full score
-    if not os.path.exists(large_log):
-        return 5.0
-    return 2.5  # Archived but didn't remove original
+    return score
 
 
 def grade_task_03(hidden_state: dict) -> float:
-    """SSH Key Permissions: key must be 600."""
+    """SSH Key Permissions: key must be 600, and the key must be at the exact expected path."""
     if hidden_state.get("stub"):
         return 0.0
     key_path = hidden_state.get("key_path", "")
     target_mode = hidden_state.get("target_mode", 0o600)
+
+    if not key_path:
+        return 0.0
+
+    # REWARD-HACK GUARD: The grader only checks the specific key file injected
+    # by the setup. Chmoding /home or any other directory returns 0.
+    if not os.path.isfile(key_path):
+        return 0.0
+
+    ssh_dir = os.path.dirname(key_path)
+    if ssh_dir and os.path.exists(ssh_dir):
+        dir_mode = os.stat(ssh_dir).st_mode
+        if (dir_mode & 0o111) == 0:
+            hidden_state["task_03_nuked_dir_x"] = True
 
     if not os.path.exists(key_path):
         return 0.0
@@ -103,17 +110,99 @@ def grade_task_03(hidden_state: dict) -> float:
 
 def grade_task_04(hidden_state: dict) -> float:
     """Zombie cleanup — Linux only."""
-    return 0.0
-
+    target_parent_pid = hidden_state.get("target_parent_pid", "")
+    try:
+        out = subprocess.check_output(["ps", "-eo", "pid,ppid,stat,command"], text=True)
+        for line in out.splitlines()[1:]:
+            parts = line.split(maxsplit=3)
+            if len(parts) >= 3:
+                stat = parts[2]
+                ppid = parts[1]
+                if 'Z' in stat:
+                    if target_parent_pid and ppid == str(target_parent_pid):
+                        return 0.0
+                    elif not target_parent_pid:
+                        return 0.0
+        return 5.0
+    except Exception:
+        return 0.0
 
 def grade_task_05(hidden_state: dict) -> float:
-    """Port conflict — Linux only."""
-    return 0.0
+    """Port conflict: agent must explicitly kill the rogue process."""
+    target_port = hidden_state.get("target_port", "")
+    rogue_pid = hidden_state.get("rogue_pid")
+    if not target_port:
+        return 0.0
 
+    # Guard: setup never ran (non-Linux), or process was never alive
+    if rogue_pid is None:
+        return 0.0
+
+    # CRITICAL: Require explicit agent action — prevents false-success from external kills
+    if not hidden_state.get("agent_killed_target", False):
+        return 0.0
+
+    if IS_LINUX:
+        try:
+            # Verify port is now actually free
+            out = subprocess.check_output(["ss", "-tulpn"], text=True)
+            port_str = f":{target_port} "
+            port_still_bound = any(
+                port_str in line and "LISTEN" in line
+                for line in out.splitlines()
+            )
+            return 0.0 if port_still_bound else 5.0
+        except Exception:
+            return 0.0
+    else:
+        # Windows: agent_killed_target + pid in killed_pids.txt
+        from env.sandbox_config import sandbox_path as sp
+        killed_file = sp("/var/run/killed_pids.txt")
+        if os.path.exists(killed_file):
+            with open(killed_file) as f:
+                if str(rogue_pid) in f.read():
+                    return 5.0
+        return 0.0
 
 def grade_task_06(hidden_state: dict) -> float:
-    """Runaway process — Linux only."""
-    return 0.0
+    """Security Incident Response: SUID cleared, user locked, attacker banned."""
+    if hidden_state.get("stub"):
+        return 0.0
+    score = 0.0
+    suid_path = hidden_state.get("suid_path", "")
+    user = hidden_state.get("compromised_user", "")
+    attacker_ip = hidden_state.get("attacker_ip", "")
+
+    # 1. SUID binary removed or SUID bit cleared
+    if suid_path:
+        if not os.path.exists(suid_path):
+            score += 2.0
+        else:
+            mode = os.stat(suid_path).st_mode
+            if not (mode & stat.S_ISUID):
+                score += 2.0
+
+    # 2. Compromised user shell set to nologin in /etc/passwd
+    passwd_path = hidden_state.get("passwd_path", sandbox_path("/etc/passwd"))
+    try:
+        content = open(passwd_path).read()
+        for line in content.splitlines():
+            if line.startswith(f"{user}:") and "/nologin" in line:
+                score += 1.5
+                break
+    except Exception:
+        pass
+
+    # 3. Attacker IP in hosts.deny
+    deny = sandbox_path("/etc/hosts.deny")
+    try:
+        content = open(deny).read()
+        if attacker_ip in content:
+            score += 1.5
+    except Exception:
+        pass
+
+    return score
 
 
 def grade_task_07(hidden_state: dict) -> float:
@@ -174,8 +263,34 @@ def grade_task_08(hidden_state: dict) -> float:
 
 
 def grade_task_09(hidden_state: dict) -> float:
-    """FD Leak — Linux only."""
-    return 0.0
+    """FD Leak: agent must explicitly kill the leaker process."""
+    target_pid = hidden_state.get("target_pid")
+
+    # Guard: setup never ran on non-Linux
+    if target_pid is None:
+        return 0.0
+
+    # CRITICAL: Require explicit agent action — prevents false-success from external kills
+    if not hidden_state.get("agent_killed_target", False):
+        return 0.0
+
+    if IS_LINUX:
+        try:
+            # Signal 0 = check existence; OSError means process is gone
+            os.kill(target_pid, 0)
+            return 0.0  # Still alive
+        except OSError:
+            return 5.0  # Confirmed dead
+        except Exception:
+            return 0.0
+    else:
+        from env.sandbox_config import sandbox_path as sp
+        killed_file = sp("/var/run/killed_pids.txt")
+        if os.path.exists(killed_file):
+            with open(killed_file) as f:
+                if str(target_pid) in f.read():
+                    return 5.0
+        return 0.0
 
 
 def grade_task_10(hidden_state: dict) -> float:
@@ -226,12 +341,65 @@ def grade_task_10(hidden_state: dict) -> float:
 
 def grade_task_11(hidden_state: dict) -> float:
     """SUID Audit — Linux only."""
-    return 0.0
+    suid_files = hidden_state.get("suid_files", [])
+    if not suid_files: return 0.0
+    for f in suid_files:
+        if not os.path.exists(f):
+            pass
+        else:
+            mode = os.stat(f).st_mode
+            if mode & stat.S_ISUID:
+                return 0.0
+    return 5.0
 
 
 def grade_task_12(hidden_state: dict) -> float:
-    """Sudoers cleanup — Linux only."""
-    return 0.0
+    """Sudoers cleanup — checks /etc/sudoers AND all files under /etc/sudoers.d/."""
+    bad_entries = hidden_state.get("bad_entries", ["NOPASSWD: ALL"])
+    if not bad_entries:
+        return 0.0
+
+    sudoers_main = sandbox_path("/etc/sudoers")
+    sudoers_d_dir = sandbox_path("/etc/sudoers.d")
+
+    # Collect all sudoers files to inspect
+    files_to_check = []
+    if os.path.exists(sudoers_main):
+        files_to_check.append(sudoers_main)
+    if os.path.isdir(sudoers_d_dir):
+        for fname in os.listdir(sudoers_d_dir):
+            fpath = os.path.join(sudoers_d_dir, fname)
+            if os.path.isfile(fpath):
+                files_to_check.append(fpath)
+
+    # Need at least one file to be meaningful
+    if not files_to_check:
+        return 0.0
+
+    try:
+        # Optional syntax check on Linux (only main file — visudo -c -f)
+        if IS_LINUX and os.path.exists(sudoers_main):
+            res = subprocess.run(
+                ["visudo", "-c", "-f", sudoers_main], capture_output=True
+            )
+            if res.returncode != 0:
+                return 0.0
+
+        # Check every file: no bad entry may appear uncommented
+        for fpath in files_to_check:
+            with open(fpath, "r") as fh:
+                for line in fh:
+                    stripped = line.strip()
+                    if stripped.startswith("#"):
+                        continue
+                    for bad in bad_entries:
+                        if bad in stripped:
+                            return 0.0  # Bad entry still present
+
+        return 5.0
+
+    except Exception:
+        return 0.0
 
 
 def grade_task_13(hidden_state: dict) -> float:
@@ -247,6 +415,11 @@ def grade_task_13(hidden_state: dict) -> float:
         mode = os.stat(f).st_mode
         if mode & 0o002 != 0:  # still world-writable
             return 0.0
+
+    if intentional_writable and os.path.exists(intentional_writable):
+        mode = os.stat(intentional_writable).st_mode
+        if mode & 0o002 == 0:
+            return 2.5
 
     return 5.0
 
@@ -276,23 +449,45 @@ def grade_task_14(hidden_state: dict) -> float:
 
 
 def grade_task_15(hidden_state: dict) -> float:
-    """User Account: target user should have nologin shell."""
+    """Config Drift Detection: config matches gold, env fixed, ownership fixed."""
     if hidden_state.get("stub"):
         return 0.0
-    target_user = hidden_state.get("target_user", "")
-    target_shell = hidden_state.get("target_shell", "")
-    passwd_path = hidden_state.get("passwd_path", "")
+    score = 0.0
 
+    # 1. Config file matches gold values
+    config_path = hidden_state.get("config_path", "")
     try:
-        with open(passwd_path, "r") as f:
-            lines = f.readlines()
+        content = open(config_path).read()
+        if "db.internal" in content:
+            score += 1.0
+        if "5432" in content:
+            score += 1.0
+        if "WARN" in content:
+            score += 0.5
+        if "max_connections: 100" in content:
+            score += 0.5
     except Exception:
-        return 0.0
+        pass
 
-    for line in lines:
-        if line.startswith(f"{target_user}:"):
-            parts = line.strip().split(":")
-            if len(parts) >= 7 and parts[6] == target_shell:
-                return 5.0
+    # 2. .env file corrected
+    env_file = hidden_state.get("env_file", "")
+    try:
+        content = open(env_file).read()
+        if "db.internal" in content and "5432" in content:
+            score += 1.0
+        if "production" in content:
+            score += 0.5
+    except Exception:
+        pass
 
-    return 0.0
+    # 3. Ownership fixed
+    try:
+        import os as _os
+        owner_file = _os.path.join(_os.path.dirname(config_path), ".owner")
+        content = open(owner_file).read()
+        if "appuser" in content:
+            score += 0.5
+    except Exception:
+        pass
+
+    return score
