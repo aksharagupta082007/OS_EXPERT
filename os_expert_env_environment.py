@@ -106,9 +106,8 @@ class OsExpertEnvironment(Environment):
         if seed is None:
             seed = random.randint(0, 1000000)
         
-        # Inject deterministic broken state
-        from env.sandbox_config import SANDBOX_ROOT
-        self._current_hidden_state = self._episode_generator.generate_episode(task_id, seed, SANDBOX_ROOT)
+        # Inject deterministic broken state (use active sandbox path from world state)
+        self._current_hidden_state = self._episode_generator.generate_episode(task_id, seed, self._world_state.sandbox_path)
 
         # Wire hidden_state into router so proc.kill can record agent-kill markers
         self._router.hidden_state = self._current_hidden_state

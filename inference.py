@@ -43,7 +43,7 @@ MODEL_NAME: str = (
     or _default_model
 )
 MAX_STEPS: int = int(os.getenv("MAX_STEPS", "15"))
-SERVER_URL: str = os.getenv("SERVER_URL", "https://aksharaguptahehehehehe-os-expert-env.hf.space")
+SERVER_URL: str = os.getenv("SERVER_URL", "https://Bb-03-os-expert-env.hf.space")
 
 _raw = os.getenv("TASK_IDS", "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15")
 TASK_IDS: List[int] = [int(t.strip()) for t in _raw.split(",") if t.strip()]
