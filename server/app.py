@@ -47,6 +47,21 @@ app = create_app(
     max_concurrent_envs=100,
 )
 
+# Mount the interactive dashboard (lazy imports — doesn't slow startup)
+from .dashboard import router as dashboard_router, DASHBOARD_HTML
+app.include_router(dashboard_router)
+
+# Middleware intercepts GET / before OpenEnv's route handler (first-match-wins in FastAPI,
+# but middleware always runs first — so the dashboard wins regardless of route order)
+from starlette.requests import Request
+from starlette.responses import HTMLResponse
+
+@app.middleware("http")
+async def dashboard_at_root(request: Request, call_next):
+    if request.url.path == "/" and request.method == "GET":
+        return HTMLResponse(DASHBOARD_HTML)
+    return await call_next(request)
+
 
 from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
