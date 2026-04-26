@@ -11,8 +11,8 @@ from typing import Dict, Any
 
 IS_LINUX = platform.system() == "Linux"
 
-def __sandbox_path(sandbox_root, root: str, p: str) -> str:
-    return os.path.join(root, p.lstrip('/'))
+def _sandbox_path(sandbox_root: str, p: str) -> str:
+    return os.path.join(sandbox_root, p.lstrip('/'))
 
 def get_pid_file(sandbox_root: str) -> str:
     return f'/tmp/.openenv_pids_{os.path.basename(sandbox_root)}'

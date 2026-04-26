@@ -611,9 +611,8 @@ def main() -> None:
     client = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
 
     # \u2500\u2500 Server Readiness Probe \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    # After `openenv push`, HF Spaces takes 30-90s to restart the container.
-    # Running inference immediately risks Task 1-2 hitting stale old code.
-    # Poll /health until the server is warm before starting.
+    # Note: After `openenv push`, HF Spaces takes 30-90s to restart the container.
+    # If you run this script immediately after pushing, it may connect to the old container.
     import httpx as _httpx
     print(f"Waiting for server to be ready: {SERVER_URL} ...", flush=True)
     _probe_delays = [5, 10, 15, 20, 30, 30, 30, 30]   # max ~3 min total
