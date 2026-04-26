@@ -20,7 +20,7 @@ We gave a language model a shell, a live Linux kernel, and 15 broken systems. We
 
 **This is OS_EXPERT_ENV** — a self-improving environment where an RL agent learns to diagnose and resolve real production Linux failures through "Sovereign" system dynamics, adversarial safety gating, and GRPO-ready trajectory gathering.
 
-> **Bangalore OpenEnv Hackathon 2026 Submission** | Built with [OpenEnv](https://github.com/meta-pytorch/OpenEnv) | Deployed on [HF Spaces](https://aksharaguptahehehehehe-os-expert-env.hf.space) | Training via [Unsloth](https://github.com/unslothai/unsloth) in [Colab]([PASTE_COLAB_URL_HERE]) | [Demo Video]([PASTE_YOUTUBE_URL_HERE])
+> **Bangalore OpenEnv Hackathon 2026 Submission** | Built with [OpenEnv](https://github.com/meta-pytorch/OpenEnv) | Deployed on [HF Spaces](https://aksharaguptahehehehehe-os-expert-env.hf.space) | Training via [Unsloth](https://github.com/unslothai/unsloth) in [Colab](https://colab.research.google.com/drive/1u4QYtwWQ_I7gGOdJ9zFW9SQNeautELB5)
 
 ---
 
